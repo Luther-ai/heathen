@@ -103,6 +103,42 @@ export default function SourcesView({
             ))
           )}
         </div>
+
+        {/* Installed Streaming Providers Section */}
+        <div className="mt-10">
+          <h2 className="text-xl font-bold text-[#f5f5f7] mb-3">
+            Streaming Providers
+          </h2>
+          <p className="text-xs text-[#86868b] mb-4">
+            Installed stream resolvers supporting SUB and DUB playback. Select preferred provider in the Watch view.
+          </p>
+
+          <div className="rounded-2xl bg-zinc-950 border border-white/10 overflow-hidden divide-y divide-white/5">
+            {[
+              { id: "authorized-provider", name: "Authorized Provider", desc: "Default REST provider with authentication support", lang: "SUB / DUB" },
+              { id: "gogoanime", name: "GogoAnime Provider", desc: "High-speed multi-audio anime streaming streams", lang: "SUB / DUB" },
+              { id: "zoro", name: "Zoro / HiAnime Provider", desc: "1080p Ultra HD dual audio anime streams", lang: "SUB / DUB" },
+              { id: "anilist-official", name: "AniList Official Partner", desc: "Official licensed partners (Crunchyroll, Hulu, VRV)", lang: "SUB" },
+              { id: "custom-hls", name: "Custom Direct HLS / M3U8", desc: "Direct video & HLS stream integration adapter", lang: "SUB / DUB" }
+            ].map((p) => (
+              <div key={p.id} className="flex items-center justify-between p-5 hover:bg-white/5 transition">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400 font-bold text-xs">
+                    {p.name.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm text-[#f5f5f7]">{p.name}</h4>
+                    <p className="text-xs text-[#86868b] mt-0.5">{p.desc}</p>
+                  </div>
+                </div>
+
+                <span className="text-xs px-3 py-1 rounded-full font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  {p.lang}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </main>
   );

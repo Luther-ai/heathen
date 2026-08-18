@@ -17,58 +17,147 @@ export default function WatchView({
   onSelectEpisode
 }: WatchViewProps) {
   const [anime, setAnime] = useState<Anime | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isChangingStream, setIsChangingStream] = useState(false);
   const [episodeNumber, setEpisodeNumber] = useState(initialEpisode);
   const [audio, setAudio] = useState<"sub" | "dub">("sub");
-  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [providers, setProviders] = useState<{ id: string; name: string; description: string }[]>([
+    { id: "authorized-provider", name: "Authorized Provider", description: "Default authenticated provider" },
+    { id: "gogoanime", name: "GogoAnime Provider", description: "Multi-audio SUB and DUB streams" },
+    { id: "zoro", name: "Zoro / HiAnime Provider", description: "High bitrate 1080p dual audio streams" },
+    { id: "anilist-official", name: "AniList Official Partner", description: "Official licensed partners" },
+    { id: "custom-hls", name: "Custom Direct HLS", description: "Plug & play direct streams" }
+  ]);
+  const [selectedProvider, setSelectedProvider] = useState<string>(() => {
+    return localStorage.getItem("apple-anime-selected-provider") || "authorized-provider";
+  });
+  const [streamUrl, setStreamUrl] = useState<string>("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4");
   const [providerName, setProviderName] = useState<string>("Authorized Provider");
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [officialSource, setOfficialSource] = useState<any | null>(null);
 
+  // Fetch installed providers list on mount
   useEffect(() => {
-    async function load() {
+    async function fetchProviders() {
       try {
-        setLoading(true);
+        const res = await fetch("/api/providers");
+        if (res.ok) {
+          const list = await res.json();
+          if (Array.isArray(list) && list.length > 0) {
+            setProviders(list);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load providers list:", e);
+      }
+    }
+    fetchProviders();
+  }, []);
+
+  // Load main anime metadata on mount
+  useEffect(() => {
+    let isSubscribed = true;
+    async function loadAnimeData() {
+      try {
+        setInitialLoading(true);
         const data = await getAnime(animeId);
-        setAnime(data);
-        if (data && data.streamingEpisodes && data.streamingEpisodes[episodeNumber - 1]) {
-          setOfficialSource(data.streamingEpisodes[episodeNumber - 1]);
+        if (isSubscribed) {
+          setAnime(data);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (isSubscribed) {
+          setInitialLoading(false);
+        }
+      }
+    }
+    loadAnimeData();
+    return () => {
+      isSubscribed = false;
+    };
+  }, [animeId]);
+
+  // Load stream metadata when episode, audio track, or provider changes
+  useEffect(() => {
+    let isSubscribed = true;
+    async function loadStream() {
+      try {
+        setIsChangingStream(true);
+        if (anime && anime.streamingEpisodes && anime.streamingEpisodes[episodeNumber - 1]) {
+          setOfficialSource(anime.streamingEpisodes[episodeNumber - 1]);
+        } else {
+          setOfficialSource(null);
         }
 
-        // Fetch watch stream from backend provider API
-        const watchRes = await fetch(`/api/watch/${animeId}/${episodeNumber}?audio=${audio}`);
-        if (watchRes.ok) {
+        const watchRes = await fetch(`/api/watch/${animeId}/${episodeNumber}?audio=${audio}&provider=${selectedProvider}`);
+        if (watchRes.ok && isSubscribed) {
           const watchData = await watchRes.json();
           if (watchData.streams && watchData.streams.length > 0) {
-            // Pick highest quality stream (e.g., HLS or MP4)
             const sortedStreams = [...watchData.streams].sort(
               (a, b) => parseInt(b.quality || "0") - parseInt(a.quality || "0")
             );
-            setStreamUrl(sortedStreams[0].url);
+            const newUrl = sortedStreams[0].url;
+            setStreamUrl(newUrl);
             if (watchData.provider) {
               setProviderName(watchData.provider);
             }
+
+            // Trigger autoplay on stream load
+            setTimeout(() => {
+              if (videoRef.current) {
+                videoRef.current.load();
+                const playPromise = videoRef.current.play();
+                if (playPromise !== undefined) {
+                  playPromise.catch((e) => console.debug("Autoplay handled:", e));
+                }
+              }
+            }, 100);
           }
         }
       } catch (err) {
         console.error(err);
       } finally {
-        setLoading(false);
+        if (isSubscribed) {
+          setIsChangingStream(false);
+        }
       }
     }
-    load();
-  }, [animeId, episodeNumber, audio]);
+    loadStream();
+    return () => {
+      isSubscribed = false;
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+        } catch {}
+      }
+    };
+  }, [animeId, episodeNumber, audio, selectedProvider, anime]);
 
+  // Handle play/pause with promise catch to prevent interrupted play errors
   const togglePlay = () => {
     if (videoRef.current) {
       if (isPlaying) {
-        videoRef.current.pause();
+        try {
+          videoRef.current.pause();
+        } catch {}
+        setIsPlaying(false);
       } else {
-        videoRef.current.play();
+        const playPromise = videoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              setIsPlaying(true);
+            })
+            .catch((err) => {
+              // Ignore play interruption error when media is reloaded or removed
+              console.debug("Play call safely handled:", err);
+              setIsPlaying(false);
+            });
+        }
       }
-      setIsPlaying(!isPlaying);
     }
   };
 
@@ -87,7 +176,7 @@ export default function WatchView({
     }
   };
 
-  if (loading || !anime) {
+  if (initialLoading || !anime) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-[#86868b]">
         <p className="animate-pulse">Loading Apple TV player...</p>
@@ -118,6 +207,26 @@ export default function WatchView({
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Provider Selector Dropdown */}
+          <div className="flex items-center rounded-full bg-white/10 px-3 py-1.5 border border-white/10 text-xs">
+            <span className="text-[#86868b] mr-2 hidden sm:inline">Provider:</span>
+            <select
+              value={selectedProvider}
+              onChange={(e) => {
+                const newProvider = e.target.value;
+                setSelectedProvider(newProvider);
+                localStorage.setItem("apple-anime-selected-provider", newProvider);
+              }}
+              className="bg-transparent text-white font-medium focus:outline-none cursor-pointer"
+            >
+              {providers.map((p) => (
+                <option key={p.id} value={p.id} className="bg-zinc-900 text-white">
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Sub / Dub Selector */}
           <div className="flex items-center rounded-full bg-white/10 p-1 border border-white/10 text-xs">
             <button
@@ -143,85 +252,72 @@ export default function WatchView({
       {/* Main player arena */}
       <div className="flex-1 flex flex-col items-center justify-center max-w-6xl mx-auto w-full px-6 py-8">
         <div className="relative aspect-video w-full overflow-hidden rounded-3xl bg-zinc-950 border border-white/10 shadow-2xl group">
-          {official ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-zinc-950">
-              <div className="mb-4 overflow-hidden rounded-2xl shadow-xl">
-                {official.thumbnail ? (
-                  <img src={official.thumbnail} alt="" className="h-36 w-64 object-cover" />
-                ) : anime.coverImage.large ? (
-                  <img src={anime.coverImage.large} alt="" className="h-36 w-24 object-cover" />
-                ) : null}
-              </div>
+          <video
+            ref={videoRef}
+            poster={anime.bannerImage || anime.coverImage.extraLarge || undefined}
+            className="h-full w-full object-cover"
+            playsInline
+            controls
+            autoPlay
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+          >
+            <source
+              src={streamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"}
+              type="video/mp4"
+            />
+            Your browser does not support the video tag.
+          </video>
 
-              <h3 className="text-xl font-bold text-white mb-2">
-                {official.title || `Episode ${episodeNumber}`}
-              </h3>
-              <p className="text-sm text-[#86868b] max-w-md mb-6">
-                Official streaming link provided by AniList partner ({official.site}).
-              </p>
-
+          {/* Provider & Audio Badge */}
+          <div className="absolute top-4 left-4 z-10 flex items-center gap-2 pointer-events-none">
+            <span className="rounded-full bg-black/60 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white border border-white/10">
+              {providerName} ({audio.toUpperCase()})
+            </span>
+            {official && (
               <a
                 href={official.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-full bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 shadow-lg shadow-blue-600/30"
+                className="pointer-events-auto flex items-center gap-1 rounded-full bg-blue-600/80 hover:bg-blue-600 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white transition"
               >
-                <ExternalLink className="h-4 w-4" />
-                Watch on {official.site}
+                <ExternalLink className="h-3 w-3" />
+                {official.site}
               </a>
-            </div>
-          ) : (
-            <>
-              <video
-                key={streamUrl || "default"}
-                ref={videoRef}
-                poster={anime.bannerImage || anime.coverImage.extraLarge || undefined}
-                className="h-full w-full object-cover"
-                playsInline
-                controls
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-              >
-                <source
-                  src={streamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"}
-                  type="video/mp4"
-                />
-                Your browser does not support the video tag.
-              </video>
+            )}
+          </div>
 
-              {/* Apple TV Player Overlay Controls */}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-6 opacity-0 transition group-hover:opacity-100 flex flex-col gap-3">
-                <div className="flex items-center justify-between text-white">
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={togglePlay}
-                      className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md transition"
-                    >
-                      {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-white" />}
-                    </button>
-                    <button
-                      onClick={toggleMute}
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition"
-                    >
-                      {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-medium text-[#86868b]">
-                      Episode {episodeNumber} of {anime.episodes || "?"}
-                    </span>
-                    <button
-                      onClick={toggleFullscreen}
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition"
-                    >
-                      <Maximize className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
+          {/* Apple TV Player Overlay Controls */}
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-6 opacity-0 transition group-hover:opacity-100 flex flex-col gap-3 pointer-events-none">
+            <div className="flex items-center justify-between text-white pointer-events-auto">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={togglePlay}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md transition"
+                >
+                  {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-white" />}
+                </button>
+                <button
+                  onClick={toggleMute}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition"
+                >
+                  {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                </button>
               </div>
-            </>
-          )}
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-[#86868b]">
+                  Episode {episodeNumber} of {anime.episodes || "?"}
+                </span>
+                <button
+                  onClick={toggleFullscreen}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition"
+                >
+                  <Maximize className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Episode selector and navigation bar */}

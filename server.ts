@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { authorizedProvider } from "./src/lib/providers/authorized-provider";
+import { getProviderById, getAllProviders } from "./src/lib/providers";
 
 const ANILIST_API = "https://graphql.anilist.co";
 
@@ -236,17 +236,23 @@ async function startServer() {
     }
   });
 
+  app.get("/api/providers", (req, res) => {
+    res.json(getAllProviders());
+  });
+
   app.get("/api/watch/:animeId/:episode", async (req, res) => {
     try {
       const animeId = Number(req.params.animeId);
       const episodeNum = Number(req.params.episode);
       const audio = req.query.audio === "dub" ? "dub" : "sub";
+      const providerId = String(req.query.provider || "authorized-provider");
 
       if (!Number.isInteger(animeId) || !Number.isInteger(episodeNum)) {
         return res.status(400).json({ error: "Invalid anime ID or episode number" });
       }
 
-      const episodes = await authorizedProvider.getEpisodes(animeId);
+      const activeProvider = getProviderById(providerId);
+      const episodes = await activeProvider.getEpisodes(animeId);
       const list = audio === "dub" ? episodes.dub : episodes.sub;
       const selected = list.find((item) => item.number === episodeNum) || list[0];
 
@@ -254,10 +260,11 @@ async function startServer() {
         return res.status(404).json({ error: "Episode unavailable" });
       }
 
-      const streams = await authorizedProvider.getStreams(selected.id, audio);
+      const streams = await activeProvider.getStreams(selected.id, audio);
 
       res.json({
-        provider: authorizedProvider.name,
+        providerId: activeProvider.id,
+        provider: activeProvider.name,
         animeId,
         episode: selected.number,
         title: selected.title,
