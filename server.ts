@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { getProviderById, getAllProviders } from "./src/lib/providers";
+import { providerManager } from "./src/lib/providers/ProviderManager";
 
 const ANILIST_API = "https://graphql.anilist.co";
 
@@ -237,7 +237,11 @@ async function startServer() {
   });
 
   app.get("/api/providers", (req, res) => {
-    res.json(getAllProviders());
+    res.json(providerManager.getEnabledProviders().map(p => ({
+      id: p.id,
+      name: p.name,
+      enabled: providerManager.isProviderEnabled(p.id)
+    })));
   });
 
   app.get("/api/watch/:animeId/:episode", async (req, res) => {
@@ -245,35 +249,25 @@ async function startServer() {
       const animeId = Number(req.params.animeId);
       const episodeNum = Number(req.params.episode);
       const audio = req.query.audio === "dub" ? "dub" : "sub";
-      const providerId = String(req.query.provider || "authorized-provider");
+      const providerId = req.query.provider ? String(req.query.provider) : undefined;
 
       if (!Number.isInteger(animeId) || !Number.isInteger(episodeNum)) {
         return res.status(400).json({ error: "Invalid anime ID or episode number" });
       }
 
-      const activeProvider = getProviderById(providerId);
-      const episodes = await activeProvider.getEpisodes(animeId);
-      const list = audio === "dub" ? episodes.dub : episodes.sub;
-      const selected = list.find((item) => item.number === episodeNum) || list[0];
-
-      if (!selected) {
-        return res.status(404).json({ error: "Episode unavailable" });
-      }
-
-      const streams = await activeProvider.getStreams(selected.id, audio);
+      const result = await providerManager.getStreams(animeId, episodeNum, audio, providerId);
 
       res.json({
-        providerId: activeProvider.id,
-        provider: activeProvider.name,
+        providerId: result.provider.id,
+        provider: result.provider.name,
         animeId,
-        episode: selected.number,
-        title: selected.title,
+        episode: episodeNum,
         audio,
-        streams
+        streams: result.streams
       });
     } catch (error: any) {
       console.error("[WatchAPI] Error resolving episode:", error);
-      res.status(500).json({ error: "Unable to resolve episode stream" });
+      res.status(500).json({ error: error.message || "Unable to resolve episode stream" });
     }
   });
 

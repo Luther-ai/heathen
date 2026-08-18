@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, ExternalLink, ChevronLeft, ChevronRight, AlertTriangle, RefreshCw, ServerCrash } from "lucide-react";
 import { Anime } from "@/types";
 import { getAnime } from "@/services/anilist";
 
@@ -31,7 +31,8 @@ export default function WatchView({
   const [selectedProvider, setSelectedProvider] = useState<string>(() => {
     return localStorage.getItem("apple-anime-selected-provider") || "authorized-provider";
   });
-  const [streamUrl, setStreamUrl] = useState<string>("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4");
+  const [streamUrl, setStreamUrl] = useState<string | null>("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4");
+  const [streamError, setStreamError] = useState<string | null>(null);
   const [providerName, setProviderName] = useState<string>("Authorized Provider");
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -86,6 +87,8 @@ export default function WatchView({
     async function loadStream() {
       try {
         setIsChangingStream(true);
+        setStreamError(null);
+
         if (anime && anime.streamingEpisodes && anime.streamingEpisodes[episodeNumber - 1]) {
           setOfficialSource(anime.streamingEpisodes[episodeNumber - 1]);
         } else {
@@ -101,8 +104,12 @@ export default function WatchView({
             );
             const newUrl = sortedStreams[0].url;
             setStreamUrl(newUrl);
+            setStreamError(null);
             if (watchData.provider) {
               setProviderName(watchData.provider);
+            }
+            if (watchData.providerId) {
+              setSelectedProvider(watchData.providerId);
             }
 
             // Trigger autoplay on stream load
@@ -115,10 +122,22 @@ export default function WatchView({
                 }
               }
             }, 100);
+          } else {
+            setStreamUrl(null);
+            const provObj = providers.find((p) => p.id === selectedProvider);
+            setStreamError(`Provider "${provObj?.name || selectedProvider}" did not return a valid stream for Episode ${episodeNumber} (${audio.toUpperCase()}).`);
           }
+        } else if (isSubscribed) {
+          setStreamUrl(null);
+          const provObj = providers.find((p) => p.id === selectedProvider);
+          setStreamError(`Provider "${provObj?.name || selectedProvider}" responded with an error when fetching Episode ${episodeNumber}.`);
         }
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        if (isSubscribed) {
+          setStreamUrl(null);
+          const provObj = providers.find((p) => p.id === selectedProvider);
+          setStreamError(`Failed to connect to provider "${provObj?.name || selectedProvider}".`);
+        }
       } finally {
         if (isSubscribed) {
           setIsChangingStream(false);
@@ -134,7 +153,7 @@ export default function WatchView({
         } catch {}
       }
     };
-  }, [animeId, episodeNumber, audio, selectedProvider, anime]);
+  }, [animeId, episodeNumber, audio, selectedProvider, anime, providers]);
 
   // Handle play/pause with promise catch to prevent interrupted play errors
   const togglePlay = () => {
@@ -252,72 +271,146 @@ export default function WatchView({
       {/* Main player arena */}
       <div className="flex-1 flex flex-col items-center justify-center max-w-6xl mx-auto w-full px-6 py-8">
         <div className="relative aspect-video w-full overflow-hidden rounded-3xl bg-zinc-950 border border-white/10 shadow-2xl group">
-          <video
-            ref={videoRef}
-            poster={anime.bannerImage || anime.coverImage.extraLarge || undefined}
-            className="h-full w-full object-cover"
-            playsInline
-            controls
-            autoPlay
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
-          >
-            <source
-              src={streamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"}
-              type="video/mp4"
-            />
-            Your browser does not support the video tag.
-          </video>
+          {streamError ? (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 sm:p-8 bg-zinc-950/95 text-center backdrop-blur-md">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 mb-4 animate-bounce">
+                <AlertTriangle className="h-7 w-7" />
+              </div>
 
-          {/* Provider & Audio Badge */}
-          <div className="absolute top-4 left-4 z-10 flex items-center gap-2 pointer-events-none">
-            <span className="rounded-full bg-black/60 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white border border-white/10">
-              {providerName} ({audio.toUpperCase()})
-            </span>
-            {official && (
-              <a
-                href={official.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="pointer-events-auto flex items-center gap-1 rounded-full bg-blue-600/80 hover:bg-blue-600 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white transition"
-              >
-                <ExternalLink className="h-3 w-3" />
-                {official.site}
-              </a>
-            )}
-          </div>
+              <h3 className="text-xl font-bold text-white mb-2">
+                Stream Unavailable
+              </h3>
 
-          {/* Apple TV Player Overlay Controls */}
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-6 opacity-0 transition group-hover:opacity-100 flex flex-col gap-3 pointer-events-none">
-            <div className="flex items-center justify-between text-white pointer-events-auto">
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={togglePlay}
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md transition"
-                >
-                  {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-white" />}
-                </button>
-                <button
-                  onClick={toggleMute}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition"
-                >
-                  {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                </button>
+              <p className="text-xs sm:text-sm text-[#86868b] max-w-lg mb-6 leading-relaxed">
+                {streamError}
+              </p>
+
+              {/* Alternative Provider Selector */}
+              <div className="w-full max-w-lg bg-zinc-900/90 border border-white/10 rounded-2xl p-4 mb-6">
+                <p className="text-xs font-semibold text-[#86868b] uppercase tracking-wider mb-3 text-left">
+                  Select an Alternative Provider:
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {providers.map((p) => {
+                    const isSelected = p.id === selectedProvider;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          setSelectedProvider(p.id);
+                          localStorage.setItem("apple-anime-selected-provider", p.id);
+                        }}
+                        className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition ${
+                          isSelected
+                            ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                            : "bg-white/5 text-white hover:bg-white/15 border border-white/5"
+                        }`}
+                      >
+                        <span className="truncate">{p.name}</span>
+                        {isSelected && (
+                          <span className="ml-2 text-[10px] font-extrabold text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full">
+                            Failing
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="flex items-center gap-3">
-                <span className="text-xs font-medium text-[#86868b]">
-                  Episode {episodeNumber} of {anime.episodes || "?"}
-                </span>
                 <button
-                  onClick={toggleFullscreen}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition"
+                  onClick={() => {
+                    setStreamError(null);
+                    const currentProv = selectedProvider;
+                    setSelectedProvider("");
+                    setTimeout(() => setSelectedProvider(currentProv), 50);
+                  }}
+                  className="flex items-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-xs font-semibold text-white hover:bg-white/20 transition border border-white/10"
                 >
-                  <Maximize className="h-4 w-4" />
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Retry Stream
+                </button>
+
+                <button
+                  onClick={() => setAudio(audio === "sub" ? "dub" : "sub")}
+                  className="rounded-full bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-blue-500 transition shadow-lg shadow-blue-600/30"
+                >
+                  Switch to {audio === "sub" ? "DUB" : "SUB"}
                 </button>
               </div>
             </div>
-          </div>
+          ) : (
+            <>
+              <video
+                ref={videoRef}
+                poster={anime.bannerImage || anime.coverImage.extraLarge || undefined}
+                className="h-full w-full object-cover"
+                playsInline
+                controls
+                autoPlay
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+              >
+                <source
+                  src={streamUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"}
+                  type="video/mp4"
+                />
+                Your browser does not support the video tag.
+              </video>
+
+              {/* Provider & Audio Badge */}
+              <div className="absolute top-4 left-4 z-10 flex items-center gap-2 pointer-events-none">
+                <span className="rounded-full bg-black/60 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white border border-white/10">
+                  {providerName} ({audio.toUpperCase()})
+                </span>
+                {official && (
+                  <a
+                    href={official.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="pointer-events-auto flex items-center gap-1 rounded-full bg-blue-600/80 hover:bg-blue-600 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white transition"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    {official.site}
+                  </a>
+                )}
+              </div>
+
+              {/* Apple TV Player Overlay Controls */}
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-6 opacity-0 transition group-hover:opacity-100 flex flex-col gap-3 pointer-events-none">
+                <div className="flex items-center justify-between text-white pointer-events-auto">
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={togglePlay}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md transition"
+                    >
+                      {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-white" />}
+                    </button>
+                    <button
+                      onClick={toggleMute}
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition"
+                    >
+                      {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium text-[#86868b]">
+                      Episode {episodeNumber} of {anime.episodes || "?"}
+                    </span>
+                    <button
+                      onClick={toggleFullscreen}
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md transition"
+                    >
+                      <Maximize className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Episode selector and navigation bar */}

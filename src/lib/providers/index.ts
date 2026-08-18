@@ -20,12 +20,5 @@ export function getProviderById(id?: string): AnimeProvider {
   return authorizedProvider;
 }
 
-export function getAllProviders() {
-  return [
-    { id: "authorized-provider", name: "Authorized Provider", description: "Default REST authenticated provider" },
-    { id: "anilist-official", name: "AniList Official Partner", description: "Official licensed streaming partners (Crunchyroll, Hulu)" },
-    { id: "gogoanime", name: "GogoAnime Provider", description: "Multi-audio SUB and DUB streams" },
-    { id: "zoro", name: "Zoro / HiAnime Provider", description: "High bitrate 1080p dual audio streams" },
-    { id: "custom-hls", name: "Custom Direct HLS / M3U8", description: "Plug & play custom stream links" }
-  ];
-}
+export * from "./ProviderManager";
+export type { AnimeProvider, ProviderStream, ProviderEpisode } from "./types";
