@@ -1,0 +1,7 @@
+{
+  "name": "AniStream - Apple TV Edition",
+  "description": "Premium Apple-style anime streaming platform with repository extension manager, AniList discovery, and cinematic player.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
